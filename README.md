@@ -12,7 +12,8 @@ solve them, post the results as comments, and mark cards done.
 | `get_next_task` | Next open assigned card incl. description and full comment history |
 | `get_task` | One card in full (instructions, labels, assignees, attachments, comments with `from_agent` flag) |
 | `add_comment` | Post the solution; if it exceeds the comment limit it is uploaded as a uniquely named `.md` attachment and referenced from a short comment |
-| `add_comment` | Post the solution; long messages are split into numbered `[agent]` comments |
+| `attach_file` | Attach one file to a card independently (as a deck_file attachment) |
+| `attach_files` | Attach several files (or one) to a card in a single call |
 | `mark_done` | Set the Deck *done* flag (uses the dedicated `/cards/{id}/done` endpoint) |
 | `mark_open` | Reopen a card that was closed too early |
 

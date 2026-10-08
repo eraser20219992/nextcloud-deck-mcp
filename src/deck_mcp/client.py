@@ -190,21 +190,15 @@ class DeckClient:
         )
         return data if isinstance(data, list) else []
 
-    def upload_attachment(
+    def _upload_attachment_bytes(
         self,
         board_id: int,
         stack_id: int,
         card_id: int,
         filename: str,
-        content: str,
+        content: bytes,
         mime_type: str = "text/markdown",
     ) -> dict[str, Any]:
-        """Upload `content` to a card as a `deck_file` attachment.
-
-        Multipart POST (the Deck API rejects JSON bodies for uploads);
-        verified live on Deck 1.19. The file shows up in the card's
-        attachment list and can be fetched via `attachments()`.
-        """
         url = (
             f"{APP_API}/boards/{board_id}/stacks/{stack_id}"
             f"/cards/{card_id}/attachments"
@@ -213,7 +207,7 @@ class DeckClient:
             response = self._http.post(
                 url,
                 data={"type": "deck_file"},
-                files={"file": (filename, content.encode("utf-8"), mime_type)},
+                files={"file": (filename, content, mime_type)},
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
@@ -231,6 +225,65 @@ class DeckClient:
                 f"POST {url} returned a non-JSON response: {response.text[:200]}"
             ) from None
         return body if isinstance(body, dict) else {}
+
+    def upload_attachment(
+        self,
+        board_id: int,
+        stack_id: int,
+        card_id: int,
+        filename: str,
+        content: str | bytes,
+        mime_type: str = "text/markdown",
+    ) -> dict[str, Any]:
+        """Upload `content` to a card as a `deck_file` attachment.
+
+        Multipart POST (the Deck API rejects JSON bodies for uploads);
+        verified live on Deck 1.19. The file shows up in the card's
+        attachment list and can be fetched via `attachments()`.
+        """
+        if isinstance(content, str):
+            content_bytes = content.encode("utf-8")
+        else:
+            content_bytes = content
+        return self._upload_attachment_bytes(
+            board_id,
+            stack_id,
+            card_id,
+            filename,
+            content_bytes,
+            mime_type,
+        )
+
+    def attach_file(
+        self,
+        board_id: int,
+        stack_id: int,
+        card_id: int,
+        filename: str,
+        content: str | bytes,
+        mime_type: str = "text/markdown",
+    ) -> dict[str, Any]:
+        """Upload a file attachment to a card independently.
+
+        Accepts `content` as either string or bytes.
+        """
+        if isinstance(content, str):
+            data = content.encode("utf-8")
+        else:
+            data = content
+        return self._upload_attachment_bytes(
+            board_id,
+            stack_id,
+            card_id,
+            filename,
+            data,
+            mime_type,
+        )
+
+    # aliases
+    add_attachment = upload_attachment
+    attach = attach_file
+    attach_files = attach_file
 
     def attachment_url(self, card_id: int, attachment_id: int) -> str:
         """Browser-friendly download URL for an attachment.

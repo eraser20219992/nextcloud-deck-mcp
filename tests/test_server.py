@@ -1,17 +1,22 @@
+import asyncio
 import re
 from types import SimpleNamespace
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 
 from deck_mcp.client import DeckError
+from deck_mcp.config import Config
 from deck_mcp.server import (
     AGENT_MARKER,
     COMMENT_MAX_LEN,
+    WORKFLOW,
     _brief,
     _comment_out,
     _detail,
     _select,
     attachment_filename,
+    build_server,
     publish_response,
     split_message,
 )
@@ -268,3 +273,102 @@ def test_publish_falls_back_to_chunks_when_upload_fails():
         assert comment["card_id"] == 162
         if index:
             assert "continued" in comment["message"]
+
+
+# ------------------------------------------------------- tool usage / error text
+
+
+class ServerClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.done = {}
+
+    def boards(self):
+        return [{"id": 11, "title": "Board"}]
+
+    def stacks(self, board_id):
+        return [{"id": 49, "title": "Lane"}]
+
+    def cards(self, board_id, stack_id):
+        return [
+            card(162, assignees=["u"], labels=["coding"]),
+            card(163, assignees=["someone_else"]),
+        ]
+
+    def card(self, board_id, stack_id, card_id):
+        return card(card_id, assignees=["u"])
+
+    def comments(self, card_id):
+        return []
+
+    def set_card_done(self, card_id, done):
+        self.done[card_id] = done
+        return {"id": card_id, "done": "2026-10-08T12:00:00+00:00" if done else None}
+
+    def attach_file(
+        self, board_id, stack_id, card_id, filename, content, mime_type="text/markdown"
+    ):
+        self.uploads.append({"card_id": card_id, "filename": filename, "content": content})
+        return {"id": len(self.uploads), "type": "deck_file", "data": filename}
+
+
+def make_server():
+    config = Config(
+        url="https://cloud.example.com",
+        username="u",
+        password="p",
+        board="Board",
+        lane="Lane",
+        board_id=11,
+        lane_id=49,
+        assignee=None,
+    )
+    return build_server(config, ServerClient())
+
+
+def call_tool(name, arguments):
+    return asyncio.run(make_server().call_tool(name, arguments))
+
+
+def test_workflow_requires_tool_name():
+    assert '"name"' in WORKFLOW
+    assert "arguments" in WORKFLOW
+
+
+def test_tool_descriptions_include_call_shape():
+    tools = {t.name: t for t in asyncio.run(make_server().list_tools())}
+    assert '{"name": "get_task", "arguments": {"card_id": 162}}' in tools["get_task"].description
+    assert "Call shape" in tools["attach_files"].description
+
+
+def test_validation_error_repeats_usage():
+    with pytest.raises(ToolError) as info:
+        call_tool("get_task", {})
+    message = str(info.value)
+    assert "card_id" in message
+    assert "How to call the 'get_task' tool" in message
+    assert '{"name": "get_task"' in message
+
+
+def test_anticipated_body_error_repeats_usage():
+    with pytest.raises(ToolError) as info:
+        call_tool("add_comment", {"card_id": 162, "message": "   "})
+    message = str(info.value)
+    assert "message must not be empty" in message
+    assert "How to call the 'add_comment' tool" in message
+    assert '{"name": "add_comment"' in message
+
+
+def test_attach_files_accepts_single_object():
+    result = call_tool(
+        "attach_files",
+        {"card_id": 162, "files": {"filename": "a.md", "content": "A"}},
+    )
+    assert result.structured_content["result"][0]["filename"] == "a.md"
+
+
+def test_attach_files_missing_content_repeats_usage():
+    with pytest.raises(ToolError) as info:
+        call_tool("attach_files", {"card_id": 162, "files": [{"filename": "a.md"}]})
+    assert "files[0] is missing 'content'" in str(info.value)
+    assert "How to call the 'attach_files' tool" in str(info.value)
